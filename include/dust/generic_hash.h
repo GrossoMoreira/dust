@@ -8,6 +8,9 @@
 #define CRYPTOPP_ENABLE_NAMESPACE_WEAK 1
 #include <cryptopp/md5.h>
 
+#include <iostream>
+#include <cstring>
+
 //using H = CryptoPP::SHA1;
 //using H = CryptoPP::Tiger;
 //using H = CryptoPP::Whirlpool;
@@ -16,16 +19,34 @@
 
 namespace dust
 {
-	template <typename H> struct generic_hash
+	template <typename H> class generic_hash
 	{
 		static const unsigned long int size = H::DIGESTSIZE;
 
 		byte value[size];
 
-		template <typename T> generic_hash(const T& v)
+		static void stream(H& h, const char* v)
 		{
-			H hasher;
-			hasher.CalculateDigest(value, (const byte*)&v, sizeof(T));
+			h.Update(reinterpret_cast<const byte*>(v), std::strlen(v));
+		}
+
+		static void stream(H&h, const std::string& v)
+		{
+			h.Update(reinterpret_cast<const byte*>(v.c_str()), v.size());
+		}
+
+		template <typename T> static void stream(H& h, const T& v)
+		{
+			h.Update(reinterpret_cast<const byte*>(&v), sizeof(T));
+		}
+
+		public:
+
+		template <typename ... T> generic_hash(const T&... args)
+		{
+			H h;
+			(stream(h, args), ...);
+			h.Final(value);
 		}
 
 		void rehash()
@@ -36,34 +57,44 @@ namespace dust
 			hasher.CalculateDigest(value, buff, size);
 		}
 
-		const bool operator==(const generic_hash<H>& other)
+		bool operator==(const generic_hash<H>& other) const
 		{
-			return memcmp(value, other.value, size);
+			return memcmp(value, other.value, size) == 0;
 		}
 
-		const bool operator==(const generic_hash<H>& other) const
+		bool operator==(const generic_hash<H>& other)
 		{
-			return memcmp(value, other.value, size);
+			return memcmp(value, other.value, size) == 0;
 		}
 
-		const bool operator<(const generic_hash<H>& other)
+		bool operator!=(const generic_hash<H>& other) const
+		{
+			return !(*this == other);
+		}
+
+		bool operator!=(const generic_hash<H>& other)
+		{
+			return !(*this == other); 
+		}
+		bool operator<(const generic_hash<H>& other)
 		{
 			return memcmp(value, other.value, size) < 0;
 		}
 
-		const bool operator<(const generic_hash<H>& other) const
+		bool operator<(const generic_hash<H>& other) const
 		{
 			return memcmp(value, other.value, size) < 0;
 		}
 
-		std::string str()
+		std::string str() const
 		{
-			unsigned char* p1 = (unsigned char*) value;
+			const unsigned char* p1 = reinterpret_cast<const unsigned char*>(value);
 			std::string s;
-			for(unsigned int i = 0; i < size/3; ++i)
+			for(unsigned int i = 0; i < size/8; ++i)
 			{
-				s += std::to_string((int)p1[i]);
-				s += " ";
+				if(i != 0)
+					s += " ";
+				s += std::to_string(static_cast<int>(p1[i]));
 			}
 			return s;
 		}

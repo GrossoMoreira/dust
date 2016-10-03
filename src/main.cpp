@@ -1,12 +1,43 @@
 #include "dust/c_hashing.h"
+#include "dust/cache.h"
+#include "dust/tester.h"
+
+#include <shpp/shpp.h>
 
 #include <iostream>
 #include <vector>
+#include <functional>
+
+typedef size_t NodeId;
+typedef size_t ObjId;
+
+void test_cache()
+{
+
+	struct asd
+	{
+		char a[30];
+	};
+
+	std::cout << "test_cache\n";
+	dust::cache<> C(20);
+
+	for(int i = 0; i < 10; ++i)
+	{
+		long* l = new long[1];
+		C.put(i, l); 
+	}
+
+
+	C.put(10, new asd[1]);
+}
+
+
 
 struct node
 {
-	int id;
-	std::set<int> objects;
+	NodeId id;
+	std::set<ObjId> objects;
 };
 
 std::vector<node*> nodes;
@@ -19,10 +50,24 @@ void dump_count()
 		std::cout << "n" << n->id << ": " << n->objects.size() << std::endl;
 }
 
-/* Creates n nodes */
-void insert_nodes(int n)
+void dump_objects()
 {
-	for(int i = 0; i < n; ++i)
+	std::cout << "#Dump objects:" << std::endl;
+	for(node* n : nodes)
+	{
+		std::cout << "n" << n->id << ": " << n->objects.size() << " :\t[ ";
+		for(ObjId o : n->objects)
+		{
+			std::cout << o << " ";
+		}
+		std::cout << std::endl;
+	}
+}
+
+/* Creates n nodes */
+void insert_nodes(dust::c_hashing<>& H, NodeId n)
+{
+	for(NodeId i = 0; i < n; ++i)
 	{
 		node* n = new node();
 		n->id = i;
@@ -31,40 +76,58 @@ void insert_nodes(int n)
 	}
 }
 
-/* Puts n objects in respective nodes */
-void insert_objects(int n)
+void clear_nodes()
 {
-	for(int i = 0; i < n; ++i)
-		nodes[H.get_node(i)]->objects.insert(i);
+	for(node* n : nodes)
+		delete n;
+	nodes.clear();
 }
 
+/* Puts n objects in respective nodes */
+void insert_objects(ObjId n)
+{
+	for(ObjId i = 0; i < n; ++i)
+	{
+		NodeId target = H.get_node(i);
+		if(target > nodes.size() - 1)
+		{
+			std::cout << "insert " << i << " into " << target << " out of bounds (" << nodes.size() << ")\n";
+			exit(-1);
+		}
+		nodes[target]->objects.insert(i);
+	}
+}
+
+void test_c_hash()
+{
+	insert_nodes(H, 4);
+	H.set_fault_tolerance(0.5);
+	H.dump();
+
+	dust::c_hashing<> H2;
+	insert_nodes(H2, 3);
+	H2.set_fault_tolerance(0.5);
+
+	H2.dump();
+
+}
+
+dust::c_hashing<> h;
+
 int main() {
-	// create nodes and objects
-	insert_nodes(10);
-	insert_objects(1000000);
 
-	// save which objects went to node 0
-	std::set<int> sv0objects = nodes[0]->objects;
+	ObjId O = 1000;
+	NodeId N = 10;
 
-	// clear everything
-	nodes.clear();
-	H = dust::c_hashing<>();
+	shpp::service s;
 
-	// now only insert half the nodes
-	insert_nodes(5);
+	s.provide("add", +[](int a) { h.insert_node(static_cast<size_t>(a)); });
+	s.provide("rangeadd", +[](int a, int b) { for(int i = a; i <= b; ++i) h.insert_node(static_cast<size_t>(i)); });
+	s.provide("rm", +[](int a) { h.remove_node(static_cast<size_t>(a)); });
+	s.provide("tolerance", +[](double t) { h.set_fault_tolerance(t); });
+	s.provide("vnodes", +[](int n) { h.set_num_virtual_nodes(static_cast<unsigned int>(n)); });
+	s.provide("dump", +[]() { h.dump(); });
 
-	// insert objects again
-	insert_objects(1000000);
-
-	// dump stuff
-	dump_count();
-
-	// check if the objects that were inserted in node 0 in the first attempt are also in node 0 now
-	std::set<int> super = nodes[0]->objects;
-	bool is_subset = std::includes(super.begin(), super.end(), sv0objects.begin(), sv0objects.end());
-
-	if(is_subset)
-		std::cout << "Great success! The most useful property of consistent hashing has been fulfilled!" << std::endl;
-	else
-		std::cout << "This implementation of consistent hashing has failed!" << std::endl;
+	shpp::shell sh(s, shpp::shell::colors_disabled);
+	sh.start();
 }
