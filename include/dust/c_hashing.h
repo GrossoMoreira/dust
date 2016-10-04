@@ -198,57 +198,18 @@ namespace dust
 			return transfers;
 		}
 
-		public:
-
-		static constexpr vnode_id default_num_virtual_nodes = 3;
-
-		c_hashing(vnode_id num_virtual_nodes = default_num_virtual_nodes) :
-			num_virtual_nodes(num_virtual_nodes),
-			fault_tolerance(0),
-			backup_range(0)
+		plan change_backup_range(unsigned int new_range)
 		{
-		}
-
-		c_hashing(const c_hashing& other)
-		{
-			num_virtual_nodes = other.num_virtual_nodes;
-			fault_tolerance = other.fault_tolerance;
-			backup_range = other.backup_range;
-
-			for(NodeId n : other.nodes)
-				insert_node(n);
-		}
-
-		void dump()
-		{
-			std::cout << "dumping c_hashing table\n";
-			for(auto& p : slices)
-			{
-				std::cout << p.str(backup_range) << std::endl;
-			}
-		}
-
-		void set_fault_tolerance(double tolerance)
-		{
-			if(tolerance < 0 || tolerance > 1)
-				return;
-
-			decltype(backup_range) new_range = std::ceil(tolerance * nodes.size());
-
 			plan transfers;
 
 			if(new_range > backup_range)
 			{
 				for(slice& s : slices)
 				{
-					std::cout << "current slice: " << s.str_id() << std::endl;
-
 					slice* next = s.next;
 					auto count = backup_range;
 					while(count--)
 						next = next->next;
-
-					std::cout << "next: " << next->str_id() << std::endl;
 
 					for(auto r = backup_range; r < new_range; ++r)
 					{
@@ -286,9 +247,56 @@ namespace dust
 			}
 
 			backup_range = new_range;
-			std::cout << "fault tolerance set to " << backup_range << " (" << tolerance * 100 << "%)\n";
+			std::cout << "fault tolerance set to " << backup_range << " (" << fault_tolerance * 100 << "%)\n";
 
-			transfers.dump();
+			return transfers;
+		}
+
+		public:
+
+		static constexpr vnode_id default_num_virtual_nodes = 3;
+
+		c_hashing(vnode_id num_virtual_nodes = default_num_virtual_nodes) :
+			num_virtual_nodes(num_virtual_nodes),
+			fault_tolerance(0),
+			backup_range(0)
+		{
+		}
+
+		c_hashing(const c_hashing& other)
+		{
+			num_virtual_nodes = other.num_virtual_nodes;
+			fault_tolerance = other.fault_tolerance;
+			backup_range = other.backup_range;
+
+			for(NodeId n : other.nodes)
+				insert_node(n);
+		}
+
+		void dump()
+		{
+			std::cout << "dumping c_hashing table\n";
+			for(auto& p : slices)
+			{
+				std::cout << p.str(backup_range) << std::endl;
+			}
+		}
+
+		plan set_fault_tolerance(double tolerance)
+		{
+			if(tolerance < 0 || tolerance >= 1)
+				throw invalid_argument("set_fault_tolerance requires 0 <= tolerance < 1");
+
+			fault_tolerance = tolerance;
+
+			plan transfers;
+
+			decltype(backup_range) new_range = std::ceil(tolerance * nodes.size());
+
+			if(new_range != backup_range)
+				transfers = change_backup_range(new_range);
+
+			return transfers;
 		}
 
 		plan set_num_virtual_nodes(unsigned int n)
@@ -347,6 +355,8 @@ namespace dust
 			for(vnode_id i = 0; i < num_virtual_nodes; ++i)
 				p.merge(insert_vnode(node, i));
 
+			p.merge(set_fault_tolerance(fault_tolerance));
+
 			p.dump();
 		}
 
@@ -385,6 +395,8 @@ namespace dust
 						previous = slices.begin();
 				}
 			}
+
+			transfers.merge(set_fault_tolerance(fault_tolerance));
 
 			transfers.dump();
 
